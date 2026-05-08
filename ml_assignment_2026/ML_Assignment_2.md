@@ -1,186 +1,489 @@
-# Machine Learning – Assignment 2
+# Machine Learning - Assignment 2
 
-**Topic:** Predicting whether an AI agent can answer a user's request with the tools it was given.
+## Should an AI agent call a tool, or refuse?
 
----
+Modern AI agents are often given a list of external tools: search APIs, calendar APIs, weather APIs, ML model APIs, finance APIs, database APIs, and so on. A useful agent must do two things well:
 
-## Data
+1. Call a tool when at least one available tool can help answer the user.
+2. Refuse to call a tool when none of the available tools are relevant.
 
-**Data source:** Berkeley Function-Calling Leaderboard (BFCL v4) — a benchmark used to evaluate how well large-language-model "agents" call external tools/functions. The original benchmark is published by the Gorilla LLM team (UC Berkeley).
+In this assignment you will build machine-learning models for this decision.
 
-You are given a single CSV file: **`agent_tasks.csv`** (≈ 3,500 rows).
+The target variable is:
 
-Each row describes one **agent task**: a user message together with the list of tools/functions that the agent was offered. The columns are:
+**`can_answer`**
 
-| # | Column | Type | Description |
-|---|---|---|---|
-| 1 | `task_id` | string | Unique id of the task in the original benchmark. |
-| 2 | `category` | string | The benchmark sub-category the task comes from. One of: `simple`, `multiple`, `parallel`, `parallel_multiple`, `irrelevance`, `live_simple`, `live_multiple`, `live_parallel`, `live_parallel_multiple`, `live_irrelevance`, `live_relevance`. |
-| 3 | `is_live_benchmark` | int (0/1) | 1 if the task comes from the *live* part of the benchmark (real user prompts collected in the wild), 0 if it comes from the *static* hand-curated part. |
-| 4 | `query` | string | The raw natural-language request the user wrote. |
-| 5 | `query_char_length` | int | Number of characters in `query`. |
-| 6 | `query_word_count` | int | Number of words in `query`. |
-| 7 | `query_question_marks` | int | Number of `?` characters in `query`. |
-| 8 | `query_digit_count` | int | Number of digit characters (0–9) in `query`. |
-| 9 | `query_uppercase_words` | int | Number of fully-uppercase words in `query` (e.g. `USA`, `API`). |
-| 10 | `num_available_tools` | int | Number of tools/functions offered to the agent for this task. |
-| 11 | `tool_names` | string | Pipe-separated (`|`) list of the tool names. May be empty (a few degenerate BFCL tasks have no tools). |
-| 12 | `total_params` | int | Total number of parameters across all available tools. |
-| 13 | `total_required_params` | int | Total number of *required* parameters across all available tools. |
-| 14 | `num_string_params` | int | How many parameters are of type `string`. |
-| 15 | `num_numeric_params` | int | How many parameters are numeric (`integer` or `float`). |
-| 16 | `num_boolean_params` | int | How many parameters are of type `boolean`. |
-| 17 | `num_array_params` | int | How many parameters are of type `array`. |
-| 18 | `num_object_params` | int | How many parameters are of type `object`/`dict`. |
-| 19 | `num_enum_params` | int | How many parameters are constrained to an `enum` (a fixed set of values). |
-| 20 | `has_default_values` | int (0/1) | 1 if at least one parameter has a default value, else 0. |
-| 21 | `avg_param_description_length` | float | Average length (in characters) of the parameter descriptions, across all tools of the task. **May be missing** when no tool has any parameters. |
-| 22 | `tool_description_total_length` | int | Sum of the character lengths of the tool descriptions. |
-| 23 | `label_is_relevant` | int (0/1) | **The label.** 1 if at least one of the available tools is relevant to the user's request, 0 if none of the tools can answer the request (the agent should refuse). |
+* `1`: at least one available tool is relevant to the user request.
+* `0`: none of the available tools are relevant, so the agent should not call a tool.
 
-> **Background — what is "relevance" in agent benchmarks?**
-> A common failure mode of LLM agents is that they "hallucinate" a tool call even when none of the tools can actually fulfil the user's request. The `irrelevance` / `live_irrelevance` parts of BFCL contain user requests where **no available tool is suitable**, and the correct agent behaviour is to *not* call any tool. The `relevance` / `simple` / `multiple` / … parts contain requests where at least one tool *is* relevant.
-
-**Your task** is to predict the binary label `label_is_relevant` from the other features (Sections C and the bonus). You will also explore the structure of the tasks via clustering (Section D).
-
-> **Note:** The label counts are imbalanced (≈ 68% relevant / 32% irrelevant). You are expected to handle this as we learned in class, or — if you choose not to — provide a clear justification.
+This is a binary classification problem with an important practical meaning: a false positive means the agent calls a tool when it should refuse.
 
 ---
 
-## Requirements
+## Data Files
 
-### Section A — Data Exploration & Visualisation (10 pts)
+Use the two required curated CSV files below:
 
-Explore the data using tables, visualisations, and other relevant methods.
+1. **`agent_tool_tasks.csv`** - primary dataset for Sections A-D.
+2. **`api_catalog.csv`** - secondary dataset for Section E.
 
-- Plots must have an informative main title, axis labels, and a legend (when needed).
-- For each plot or table, write a short description of the **key observations**. Only include content that is meaningful / informative.
-- The visualisations should cover all relevant aspects of the data, including basic statistics (mean, median, mode, …) of each feature.
-- Perform **at least 5 visualisations** of **at least 3 different plot types**.
-- Include at least one visualisation that compares the two classes of `label_is_relevant`, and at least one that compares the static vs. live benchmark splits.
+There is also an optional helper file, **`domain_coverage_summary.csv`**, which contains a precomputed domain-level summary for Section E. You can use it as a check, but you should be able to recreate the same table from the two required CSVs.
 
-The goal is to get insights on the data which may or may not be useful for the next sections.
+For the full column-level data dictionary, see **`DATA_DICTIONARY.md`**.
 
----
+The original raw files are kept in the folder for transparency, but your work should use `agent_tool_tasks.csv` and `api_catalog.csv`.
 
-### Section B — Data Pre-processing (30 pts)
+### Why these curated files?
 
-Apply pre-processing to prepare the data for the models in the next sections. The quality of this section directly affects your scores in Sections C and D.
+The raw benchmark data contained two direct leakage risks:
 
-#### B.1 Feature engineering
+* `category` revealed the label because categories such as `irrelevance` directly map to `can_answer = 0`.
+* `task_id` values exposed source/category names such as `irrelevance_123`.
 
-Add the following **5 mandatory engineered features**, and explain *why* each one might help the model:
-
-1. **`required_params_ratio`** — `total_required_params / total_params`. If `total_params == 0`, set this to 0.
-2. **`avg_params_per_tool`** — `total_params / num_available_tools`. If `num_available_tools == 0`, set this to 0.
-3. **`query_avg_word_length`** — average word length in characters in the `query` field.
-4. **`query_mentions_number`** — 1 if `query_digit_count > 0`, else 0.
-5. **`tool_name_diversity`** — number of *unique tool name prefixes* in the task, where the prefix is everything before the first `.` of a tool name (e.g. `math.factorial` → `math`, `get_weather` → `get_weather`). Use the `tool_names` column.
-
-In addition, design **at least 6 more features** of your own choosing. For each one, explain in one or two sentences what it captures and why you expect it to help the model.
-
-> **Note:** Trivial variants of an existing feature (e.g. `query_char_length / query_word_count` if you already have `query_avg_word_length`) count as the same feature.
-
-#### B.2 Cleaning, transformation and feature selection
-
-Apply **at least one of each** of the following to the data:
-
-- **One imputation method** (the column `avg_param_description_length` has missing values — you must handle them; explain your choice).
-- **One transformation** (e.g. scaling, log-transform, one-hot/ordinal encoding of `category`, …).
-- **One feature exclusion / selection** step (e.g. drop columns that should not be model inputs, drop highly correlated features, use `SelectKBest`, …).
-
-For each step, briefly explain **what** you did and **why**. Your choices should reflect understanding of the method.
-
-> Reminder: not every column in the CSV should be used as a model input. In particular, `task_id` and `query` are identifiers / raw text, not direct features. The column `tool_names` is also raw text — you may use it to derive features (as in B.1) but should not feed it as-is into a numerical model. The column `category` strongly leaks the label (the `*irrelevance` categories are exactly the irrelevant class) — you **must not** use `category` (or any feature directly derived from it) as a model input in Section C. You may, however, use `is_live_benchmark`.
-
-> **IMPORTANT (next sections):** You do **not** have to implement the models yourself. You may use the implementations in `scikit-learn`. If you use a different library, briefly explain it.
+The curated `agent_tool_tasks.csv` removes these fields, shuffles the rows, and assigns opaque IDs such as `task_00001`. This makes the prediction task more realistic.
 
 ---
 
-### Section C — Classifying Relevant vs. Irrelevant Tasks (25 pts)
+## Dataset 1: `agent_tool_tasks.csv`
 
-Train **at least three** different supervised models from class to predict `label_is_relevant`. At least one of them must be a **boosting** model (AdaBoost or Gradient Boosting) and at least one must be **k-Nearest-Neighbours (k-NN)**. The third model is up to you, from the supervised models we covered in class.
+Each row is one agent decision: a user query plus the tools available to the agent.
 
-- Implementation **must include hyper-parameter tuning** (at least 2 hyper-parameters per model, with at least 3 values each).
-- **Split the data into 80% / 10% / 10% train / validation / test**, stratified by `label_is_relevant`. Use `random_state=42` for reproducibility. Train only on the train set; tune hyper-parameters on the validation set; report final results on the test set.
-- For k-NN, also report the result of using either an **LSH** approximate-nearest-neighbour index *or* a **kd-tree** index, and compare its inference-time / accuracy trade-off against brute-force k-NN. *Note: at the size and dimensionality of this dataset (d ≈ 27 features, n ≈ 3,000 train points) the index-based approach will not necessarily be faster than brute-force — your job is to **measure** and **explain** what you observe.*
-- Choose and **justify a suitable evaluation metric** (remember the class imbalance!). Report it for all three models on the test set.
-- Present the test-set results of the three models in a single comparison plot (e.g. a bar chart of the metric you chose).
-- Discuss the results: which model worked best and why might that be?
+| Column | Description |
+|---|---|
+| `task_uid` | Opaque row ID. Do not use as a model feature. |
+| `is_live_benchmark` | 1 if the request came from the live benchmark, 0 otherwise. |
+| `task_complexity` | Low / medium / high bucket derived from query length, number of tools, and number of parameters. Useful for EDA. |
+| `query` | Raw user request. Use for feature engineering only. Do not feed raw text directly into numeric models unless you explicitly transform it. |
+| `query_char_length` | Number of characters in the query. |
+| `query_word_count` | Number of words in the query. |
+| `query_question_marks` | Number of `?` characters in the query. |
+| `query_digit_count` | Number of digit characters in the query. |
+| `query_uppercase_words` | Number of fully uppercase words. |
+| `num_available_tools` | Number of tools offered to the agent. |
+| `tool_names` | Pipe-separated list of tool names. May be empty. Use for feature engineering only. |
+| `total_params` | Total number of parameters across all available tools. |
+| `total_required_params` | Total number of required parameters across all tools. |
+| `num_string_params` | Number of string parameters. |
+| `num_numeric_params` | Number of numeric parameters. |
+| `num_boolean_params` | Number of boolean parameters. |
+| `num_array_params` | Number of array/list parameters. |
+| `num_object_params` | Number of object/dict parameters. |
+| `num_enum_params` | Number of enum-constrained parameters. |
+| `has_default_values` | 1 if at least one parameter has a default value. |
+| `avg_param_description_length` | Average parameter-description length. Has a few missing values. |
+| `tool_description_total_length` | Total length of all tool descriptions. |
+| `task_domain` | Broad domain inferred by a keyword classifier, such as `vision`, `nlp`, `travel`, `math`, or `other`. |
+| `can_answer` | Target label. 1 means a relevant tool exists; 0 means the agent should refuse. |
 
-#### Bonus — Feature Importance (10 pts)
-
-Not all features affect model performance equally. Perform a feature-importance analysis using **at least one** of:
-
-- correlation between each feature and the label,
-- drop-column importance (re-train without each feature and check the change in score),
-- correlation between features (to find redundant ones),
-- a model-based importance (e.g. `feature_importances_` of a tree ensemble, permutation importance, SHAP),
-- any other method of your choice (briefly explain it).
-
-Report your findings, point out the 3 most useful and the 3 least useful features, and discuss.
-
----
-
-### Section D — Clustering Agent Tasks (25 pts)
-
-Apply **at least two** clustering algorithms covered in class to the data, in order to find natural groups of agent tasks. You may use **K-Means**, **agglomerative hierarchical clustering**, or **Gaussian Mixture Models (GMM)** — pick at least two.
-
-Use the same engineered features as in Section C (you may add or remove features if you justify it). **Do not** use `label_is_relevant`, `category` or `task_id` as input features for clustering (they would either leak the label or are not informative).
-
-- Tune at least one hyper-parameter per algorithm (e.g. number of clusters `k` for K-Means / GMM, the linkage method for agglomerative clustering, …).
-- Use a clustering-quality measure of your choice (e.g. silhouette score, Davies-Bouldin, BIC for GMM, elbow plot, …) to pick the final hyper-parameters. Visualise the result of your tuning (e.g. silhouette vs. `k` plot).
-- Identify the **most important features** that drive the differences between clusters, and find a way to visualise the clusters in 2D (e.g. by projecting onto the two most informative features, or onto two engineered features of your choice).
-- Cross-tabulate your final cluster assignments with the `category` column from the original CSV. Are some clusters dominated by certain categories (e.g. `parallel*` tasks, `irrelevance` tasks)? Discuss.
-- Try to **interpret each cluster** in plain English (e.g. "small math-style tasks with one tool and a numeric query", "live tasks with many tools and long descriptions", …).
-
-#### Presentation (10 pts) — *mandatory, not a bonus!*
-
-Create a short presentation (**no more than 6 slides**) with the most interesting findings of your work. A few presentations will be picked to be presented in front of the class.
+The target is moderately imbalanced: about 68% of tasks are answerable and 32% are not answerable.
 
 ---
 
-### Section E — Exploring Tools — Bonus (15 pts)
+## Dataset 2: `api_catalog.csv`
 
-In this section you will switch the unit of analysis from *tasks* to *tools*.
+Each row is an instruction-to-API example from APIBench.
 
-- From the `tool_names` column, build a **new dataset** where each row represents one **unique tool name** (use the *full* tool name, e.g. `math.factorial`, not just the prefix). Useful per-tool features include: number of tasks the tool appears in, average number of co-available tools when it is offered, fraction of tasks (containing this tool) whose label is `relevant`, the prefix / "domain" of the tool, average `query_word_length` of tasks where the tool appears, etc. Engineer at least 5 features.
-- Formulate a clear question that can be asked about this per-tool dataset (a classification, regression *or* clustering task — your choice).
-- Suggest and apply a machine-learning algorithm that answers your question. If you use a method we have not covered in the course, include a reference to where you studied it.
-- Discuss the results and reflect on your question and your choice of method.
+Important columns:
+
+| Column | Description |
+|---|---|
+| `api_uid` | Opaque row ID. |
+| `source` | Source collection: HuggingFace, TensorFlow Hub, or Torch Hub. |
+| `split` | Original `train` / `eval` split. |
+| `instruction` | Natural-language request for an API recommendation. |
+| `instruction_word_count` | Number of words in the instruction. |
+| `instruction_keyword_hits` | Count of simple API-related keywords. |
+| `provider` | API provider name. |
+| `framework` | Framework name. |
+| `domain` | Original APIBench domain text. |
+| `functionality` | Functionality/category of the API. |
+| `api_name` | API/model name. |
+| `num_api_arguments` | Number of API arguments. |
+| `num_env_requirements` | Number of environment requirements. |
+| `has_example_code` | 1 if example code exists. |
+| `description_length` | Length of the API description. |
+| `task_domain` | Same broad domain key used in `agent_tool_tasks.csv`. |
+
+The two datasets do not share a row-level key. They can only be compared through aggregated `task_domain` statistics.
 
 ---
 
-## Guidelines
+## Dataset Caveats
 
-### Coding guidelines
+Good ML work includes understanding dataset limitations.
 
-- Use familiar packages with explicit explanations.
-- If you install any library beyond those used in the exercises, mention it in the report.
-- The code should run without warnings or errors.
-- Good documentation is critical.
-- Indicate the section of the assignment in the code (e.g. as comments / markdown headers).
-- Use meaningful variable names; do not use Python reserved words; use constants where appropriate.
+You must mention these caveats in your report:
 
-### Submission guidelines
+* `can_answer` is derived from benchmark construction, not from a new manual annotation process.
+* `task_domain` is a keyword-derived domain label. It is useful, but it is not a perfect semantic annotation.
+* `api_catalog.csv` is mostly about ML APIs, while `agent_tool_tasks.csv` contains many everyday tools such as travel, scheduling, weather, math, communication, and finance.
+* Empty or missing `tool_names` should be handled explicitly.
+* Some features are correlated. This is expected, but should be considered during feature selection.
 
-- The assignment should be submitted **in pairs** (only one submission per pair).
-- You must submit **two files** containing all sections: one in `.ipynb` format and one in `.html` format. Both files must include the program's outputs. In addition, upload a **PDF of the presentation** (Section D).
-- File names should be of the form: `ML_HW2_ID1_ID2.ipynb` / `.html` / `.pdf`.
-- Late assignments will receive a penalty of **3 points per day**, up to one week. Later submissions will not be accepted.
+---
 
-### Grading
+# Requirements
 
-You can earn more than 100 points on this exercise. Grading is based on correctness, clarity, efficiency, and elegance of implementation.
+## Section A - Data Exploration and Visualization (10 pts)
 
-### Self-learning, LLMs, and collaboration
+Explore `agent_tool_tasks.csv`.
 
-Self-learning is an important part of the course — treat all sources critically. **Use of LLMs is allowed**, but you must reference where you used them. You are encouraged to discuss with other students, but each pair must write its own work. It is reasonable to assume that not all results and algorithms will be identical between submissions.
+You must include:
 
-### Questions & reception hours
+* At least **5 visualizations**.
+* At least **3 different plot types**.
+* At least one plot comparing `can_answer = 0` vs `can_answer = 1`.
+* At least one plot comparing live vs non-live tasks using `is_live_benchmark`.
+* At least one plot or table about `task_domain`.
+* At least one plot or table about `task_complexity`.
 
-- Post questions on the exercise forum on Moodle (after reading previous posts). Professional questions sent by email will not be answered.
-- For reception hours, email the instructor in advance with your questions.
-- For personal matters (extension requests with justified reasons, etc.), email the instructor.
+For every plot or table, write 2-4 sentences explaining the key observation. Avoid describing the obvious; focus on what the result teaches you about the data.
 
-**Good luck!**
+Suggested questions:
+
+* Are answerable and non-answerable tasks different in query length?
+* Do live benchmark tasks look different from non-live tasks?
+* Which domains are common?
+* Are some domains more likely to be answerable?
+* Are tool-heavy tasks easier or harder to classify?
+
+---
+
+## Section B - Preprocessing and Feature Engineering (20 pts)
+
+Prepare the data for modeling.
+
+### B.1 Mandatory engineered features
+
+Create all 5 features below:
+
+1. **`required_params_ratio`**  
+   `total_required_params / total_params`. If `total_params == 0`, set to 0.
+
+2. **`avg_params_per_tool`**  
+   `total_params / num_available_tools`. If `num_available_tools == 0`, set to 0.
+
+3. **`query_avg_word_length`**  
+   Average word length in the raw `query`. Compute this from tokenized words, not by dividing total character count by word count.
+
+4. **`query_mentions_number`**  
+   1 if `query_digit_count > 0`, otherwise 0.
+
+5. **`tool_name_diversity`**  
+   Number of unique tool-name prefixes. The prefix is everything before the first `.`. For example, `math.factorial` has prefix `math`; `get_weather` has prefix `get_weather`.
+
+### B.2 Your own features
+
+Create at least **4 additional features** of your choice.
+
+Examples:
+
+* Number of tool-name tokens.
+* Whether the query looks like a question.
+* Ratio of numeric parameters to all parameters.
+* Log-transformed `total_params`.
+* Average tool-description length per tool.
+* Number of different parameter types used by the available tools.
+
+For each feature, explain what it captures and why it might help.
+
+### B.3 Cleaning and transformation
+
+You must perform and explain:
+
+* One imputation step, including `avg_param_description_length`.
+* One transformation step, such as scaling numeric features or one-hot encoding categorical features.
+* One feature exclusion or feature selection step.
+
+Do not use these fields directly as model inputs:
+
+* `task_uid`
+* `query`
+* `tool_names`
+* `can_answer`
+
+You may use `query` and `tool_names` to derive features.
+
+You may choose whether to use `task_domain` and `task_complexity`, but if you use them, encode them properly and explain your choice.
+
+---
+
+## Section C - Predicting Whether The Agent Can Answer (30 pts)
+
+Train supervised models to predict `can_answer`.
+
+### C.1 Data split
+
+Use:
+
+* 80% train
+* 10% validation
+* 10% test
+
+The split must be stratified by `can_answer`.
+
+Use `random_state = 42`.
+
+Train models only on the train set. Use the validation set for choosing hyperparameters. Report final performance once on the test set.
+
+### C.2 Models
+
+Train at least **3 supervised models**:
+
+1. **k-Nearest Neighbors**
+2. **One boosting model** such as AdaBoost or Gradient Boosting
+3. **One additional model** covered in class, such as logistic regression, decision tree, random forest, naive Bayes, or SVM
+
+Also include a simple baseline, such as predicting the majority class.
+
+### C.3 Hyperparameter tuning
+
+For each of the 3 main models:
+
+* Tune at least **2 hyperparameters**.
+* Try at least **3 values** for each tuned hyperparameter.
+* Choose the best setting using the validation set.
+
+### C.4 Evaluation
+
+Report all of the following on the test set:
+
+* Confusion matrix.
+* Accuracy.
+* Precision and recall for both classes.
+* F1-score for both classes.
+
+You must choose one main metric and justify it.
+
+Because the important failure case is calling a tool when none is relevant, you should pay special attention to:
+
+* Recall for `can_answer = 0`.
+* F1-score for `can_answer = 0`.
+* The number of false positives.
+
+Create one comparison plot showing the test-set performance of all models.
+
+Discuss:
+
+* Which model worked best?
+* Did the best model improve meaningfully over the baseline?
+* What types of mistakes are most concerning?
+* What would you change if false positives were very expensive?
+
+---
+
+## Section D - Clustering Agent Tasks (20 pts)
+
+Use clustering to discover natural groups of agent tasks.
+
+Use the same cleaned and engineered features from Section C, but do not include:
+
+* `can_answer`
+* `task_uid`
+* raw `query`
+* raw `tool_names`
+
+You may include or exclude `task_domain` and `task_complexity`, but explain the choice.
+
+### D.1 Algorithms
+
+Apply at least **2 clustering algorithms** covered in class.
+
+Recommended choices:
+
+* K-Means
+* Gaussian Mixture Models
+* Agglomerative clustering
+
+### D.2 Choosing the number of clusters
+
+For each clustering algorithm:
+
+* Try several values of `k` or `n_components`.
+* Plot WCSS or another appropriate clustering-quality curve.
+* Plot the silhouette score.
+* Choose the final number of clusters and justify it.
+
+If WCSS and silhouette suggest different choices, explain which one you trust more and why.
+
+### D.3 Interpretation
+
+For your final clustering:
+
+* Show cluster sizes.
+* Show the mean or median feature values per cluster.
+* Visualize clusters in 2D using two meaningful features or a dimensionality-reduction method taught in class.
+* Interpret each cluster in plain English.
+
+After clustering, you may compare clusters to `can_answer`, `task_domain`, or `is_live_benchmark` to understand them. Do not use these comparisons as inputs unless already justified in preprocessing.
+
+---
+
+## Section E - Cross-Dataset Domain Analysis (10 pts)
+
+Use `agent_tool_tasks.csv` and `api_catalog.csv`. You may use `domain_coverage_summary.csv` as a helper or validation file, but the same table can be generated from the two required CSVs.
+
+The goal is to understand how well the API catalog covers the domains found in agent-tool tasks.
+
+### E.1 Domain coverage
+
+Create or load an aggregated table by `task_domain` showing:
+
+From `agent_tool_tasks.csv`:
+
+* Number of agent tasks.
+* Mean `can_answer`.
+* Mean query word count.
+* Mean number of available tools.
+
+From `api_catalog.csv`:
+
+* Number of API rows.
+* Mean instruction word count.
+* Mean number of API arguments.
+* Most frequent provider.
+
+Discuss:
+
+* Which domains appear in both datasets?
+* Which domains appear mostly or only in the agent dataset?
+* Which domains appear mostly or only in the API catalog?
+* Does high API coverage seem related to a higher `can_answer` rate?
+* Why should we be careful about drawing causal conclusions here?
+
+### E.2 API classifier
+
+Train one classifier to predict either `provider` or `framework` in `api_catalog.csv`.
+
+Requirements:
+
+* Use the original `split` column: train on `train`, test on `eval`.
+* Use numeric features and simple text-derived features only.
+* Use at least one model covered in class.
+* Report a confusion matrix, accuracy, precision, recall, and F1-score.
+* Discuss the most confused provider/framework pairs.
+
+You may group very rare providers into an `Other` class, but you must explain your rule.
+
+### E.3 Connection back to the agent task
+
+Write one paragraph answering:
+
+How could information from the API catalog help an agent decide whether to call a tool or refuse?
+
+---
+
+## Presentation (10 pts)
+
+Create a short presentation of no more than **6 slides**.
+
+Your presentation should focus on the most important findings, not on every implementation detail.
+
+Required slides:
+
+1. Problem and data.
+2. Most important EDA insight.
+3. Best classification model and test results.
+4. Most important error analysis.
+5. Clustering or domain-coverage insight.
+6. Final recommendation or limitation.
+
+Submit the presentation as a PDF.
+
+---
+
+# Bonus Options
+
+You may earn up to **20 bonus points** total.
+
+## Bonus 1 - Feature Importance (up to 10 pts)
+
+Analyze which features matter most.
+
+Use at least one method:
+
+* Correlation with the label.
+* Model-based feature importance.
+* Permutation importance.
+* Drop-column importance.
+* Correlation between features to identify redundancy.
+
+Report:
+
+* 3 most useful features.
+* 3 least useful features.
+* Whether engineered features helped.
+* Any feature that seems suspicious or hard to interpret.
+
+## Bonus 2 - Tool-Level Analysis (up to 10 pts)
+
+Switch the unit of analysis from tasks to tools.
+
+Build a new dataset where each row is one unique tool name from `tool_names`.
+
+Create at least 5 tool-level features, such as:
+
+* Number of tasks where the tool appears.
+* Average number of co-available tools.
+* Fraction of tasks with `can_answer = 1`.
+* Average query length for tasks containing the tool.
+* Tool-name prefix.
+* Average parameter counts of tasks containing the tool.
+
+Then formulate one ML question about tools and answer it using a method covered in class.
+
+Example questions:
+
+* Can we cluster tools into common vs rare tools?
+* Can we predict whether a tool usually appears in answerable tasks?
+* Which tools are most associated with refusal cases?
+
+---
+
+# Grading Summary
+
+| Section | Points |
+|---|---:|
+| A. EDA and visualization | 10 |
+| B. Preprocessing and feature engineering | 20 |
+| C. Classification | 30 |
+| D. Clustering | 20 |
+| E. Cross-dataset domain analysis | 10 |
+| Presentation | 10 |
+| **Total** | **100** |
+| Bonus 1. Feature importance | +10 |
+| Bonus 2. Tool-level analysis | +10 |
+
+---
+
+# Code and Submission Guidelines
+
+Submit:
+
+1. Notebook: `ML_HW2_ID1_ID2.ipynb`
+2. HTML export: `ML_HW2_ID1_ID2.html`
+3. Presentation PDF: `ML_HW2_ID1_ID2.pdf`
+
+All notebook outputs must be visible in the submitted HTML.
+
+Your code should:
+
+* Run from top to bottom without errors.
+* Use clear section headers.
+* Use meaningful variable names.
+* Avoid using the test set during model selection.
+* Explain any library used beyond the standard course libraries.
+
+Major penalties:
+
+* Using `can_answer` as an input feature.
+* Using raw IDs as predictive features.
+* Evaluating on the test set repeatedly while tuning.
+* Submitting a notebook that does not run.
+* Showing plots without explaining what they mean.
+
+Late assignments receive a penalty of **3 points per day**, up to one week. Later submissions will not be accepted.
+
+Use of LLMs is allowed, but you must briefly state how you used them.
+
+Good luck.

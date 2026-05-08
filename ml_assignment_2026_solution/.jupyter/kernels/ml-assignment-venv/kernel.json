@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/edeneldar/gorilla/ml_assignment_2026/.venv/bin/python",
+    "-m",
+    "ipykernel_launcher",
+    "-f",
+    "{connection_file}"
+  ],
+  "display_name": "ML Assignment venv",
+  "language": "python"
+}

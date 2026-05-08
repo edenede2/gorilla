@@ -30,7 +30,8 @@ This notebook follows the structure of the assignment:
 * Section B — Pre-processing
 * Section C — Classification (≥ 3 supervised models, including boosting and k-NN with kd-tree comparison)
 * Bonus — Feature importance
-* Section D — Clustering (K-Means + GMM)
+* Section D — Clustering (K-Means + GMM, WCSS + silhouette, L1/L2/L∞ norm comparison)
+* Section F — Cross-dataset analysis (join with `api_recommendations.csv` via `task_type`)
 * Section E (bonus) — Per-tool dataset
 """)
 
@@ -284,7 +285,7 @@ code(r"""
 # --- Feature exclusion -------------------------------------------------------
 # - `task_id`, `query`, `tool_names` are raw / id columns
 # - `category` directly leaks the label (irrelevance == 0)
-DROP_COLS = ['task_id', 'query', 'tool_names', 'category', 'label_is_relevant']
+DROP_COLS = ['task_id', 'query', 'tool_names', 'category', 'task_type', 'label_is_relevant']
 y = df_fe['label_is_relevant'].astype(int).values
 X_full = df_fe.drop(columns=DROP_COLS)
 
@@ -554,35 +555,209 @@ print('Clustering on shape:', X_cluster.shape)
 """)
 
 code(r"""
-# --- K-Means: tune k via silhouette score ----------------------------------
-ks = list(range(2, 9))
-sil = []
-for k in ks:
-    km = KMeans(n_clusters=k, n_init=10, random_state=RANDOM_STATE).fit(X_cluster)
-    sil.append(silhouette_score(X_cluster, km.labels_, sample_size=2000,
-                                random_state=RANDOM_STATE))
-fig, ax = plt.subplots(figsize=(6, 3.5))
-ax.plot(ks, sil, 'o-', color='#1f77b4')
-ax.set_title('K-Means: silhouette score vs k'); ax.set_xlabel('k'); ax.set_ylabel('silhouette')
-plt.tight_layout(); plt.show()
-best_k = ks[int(np.argmax(sil))]
-print('Best k =', best_k, '  silhouette = %.3f' % max(sil))
+# --- Helper: Within-Cluster Sum of Squares (WCSS) --------------------------
+# WCSS = sum over all points of squared distance to the assigned cluster's
+# centroid. For K-Means, sklearn already computes it as `inertia_`.
+# For other algorithms (e.g. GMM) we compute it manually from the labels.
+def wcss(X, labels):
+    X = np.asarray(X)
+    total = 0.0
+    for c in np.unique(labels):
+        pts = X[labels == c]
+        if len(pts) == 0:
+            continue
+        centroid = pts.mean(axis=0)
+        total += float(((pts - centroid) ** 2).sum())
+    return total
 """)
 
 code(r"""
-# --- GMM: tune n_components via BIC ----------------------------------------
-ns = list(range(2, 9))
-bics = []
+# --- K-Means: tune k with the WCSS / elbow method --------------------------
+ks = list(range(1, 10))
+wcss_km = []
+sil_km  = []
+for k in ks:
+    km = KMeans(n_clusters=k, n_init=10, random_state=RANDOM_STATE).fit(X_cluster)
+    wcss_km.append(km.inertia_)            # sklearn's inertia_ == WCSS
+    # silhouette_score is undefined for k=1 (need at least 2 clusters)
+    sil_km.append(silhouette_score(X_cluster, km.labels_) if k >= 2 else np.nan)
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 3.5))
+axes[0].plot(ks, wcss_km, 'o-', color='#1f77b4')
+axes[0].set_title('K-Means: WCSS vs k (elbow)')
+axes[0].set_xlabel('k'); axes[0].set_ylabel('WCSS')
+axes[1].plot(ks, sil_km, 'o-', color='#ff7f0e')
+axes[1].set_title('K-Means: Silhouette vs k')
+axes[1].set_xlabel('k'); axes[1].set_ylabel('silhouette score')
+plt.tight_layout(); plt.show()
+
+for k, w, s in zip(ks, wcss_km, sil_km):
+    s_str = f'{s:.3f}' if not np.isnan(s) else '  n/a'
+    print(f'  k={k:2d}  WCSS={w:10.1f}  silhouette={s_str}')
+
+# Pick the elbow programmatically: the point furthest from the line that
+# joins the first and last (k, WCSS) point.
+p1 = np.array([ks[0],  wcss_km[0]])
+p2 = np.array([ks[-1], wcss_km[-1]])
+dists = []
+for k, w in zip(ks, wcss_km):
+    p = np.array([k, w])
+    # perpendicular distance from p to the line p1->p2
+    dists.append(np.abs(np.cross(p2 - p1, p1 - p)) / np.linalg.norm(p2 - p1))
+best_k = ks[int(np.argmax(dists))]
+best_k_sil = ks[int(np.nanargmax(sil_km))]
+print(f'\nElbow (WCSS) suggests   k = {best_k}')
+print(f'Silhouette suggests     k = {best_k_sil}')
+print(f'Final choice (WCSS elbow): k = {best_k}')
+""")
+
+code(r"""
+# --- GMM: tune n_components with the same WCSS / elbow method --------------
+# We have not covered BIC/AIC yet. WCSS only depends on the cluster
+# assignments, so it can be computed for any clustering algorithm using the
+# helper defined above. We also report the silhouette score as a second
+# (label-free) clustering-quality metric.
+ns = list(range(1, 10))
+wcss_gmm = []
+sil_gmm  = []
 for n in ns:
     gmm = GaussianMixture(n_components=n, covariance_type='full',
                           random_state=RANDOM_STATE).fit(X_cluster)
-    bics.append(gmm.bic(X_cluster))
-fig, ax = plt.subplots(figsize=(6, 3.5))
-ax.plot(ns, bics, 'o-', color='#9467bd')
-ax.set_title('GMM: BIC vs n_components'); ax.set_xlabel('n_components'); ax.set_ylabel('BIC (lower = better)')
+    labels = gmm.predict(X_cluster)
+    wcss_gmm.append(wcss(X_cluster, labels))
+    sil_gmm.append(silhouette_score(X_cluster, labels) if n >= 2 and len(set(labels)) >= 2 else np.nan)
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 3.5))
+axes[0].plot(ns, wcss_gmm, 'o-', color='#9467bd')
+axes[0].set_title('GMM: WCSS vs n_components (elbow)')
+axes[0].set_xlabel('n_components'); axes[0].set_ylabel('WCSS')
+axes[1].plot(ns, sil_gmm, 'o-', color='#8c564b')
+axes[1].set_title('GMM: Silhouette vs n_components')
+axes[1].set_xlabel('n_components'); axes[1].set_ylabel('silhouette score')
 plt.tight_layout(); plt.show()
-best_n = ns[int(np.argmin(bics))]
-print('Best n_components =', best_n, '  BIC = %.0f' % min(bics))
+
+for n, w, s in zip(ns, wcss_gmm, sil_gmm):
+    s_str = f'{s:.3f}' if not np.isnan(s) else '  n/a'
+    print(f'  n={n:2d}  WCSS={w:10.1f}  silhouette={s_str}')
+
+p1 = np.array([ns[0],  wcss_gmm[0]])
+p2 = np.array([ns[-1], wcss_gmm[-1]])
+dists = []
+for n, w in zip(ns, wcss_gmm):
+    p = np.array([n, w])
+    dists.append(np.abs(np.cross(p2 - p1, p1 - p)) / np.linalg.norm(p2 - p1))
+best_n = ns[int(np.argmax(dists))]
+best_n_sil = ns[int(np.nanargmax(sil_gmm))]
+print(f'\nElbow (WCSS) suggests       n = {best_n}')
+print(f'Silhouette suggests          n = {best_n_sil}')
+print(f'Final choice (WCSS elbow):   n = {best_n}')
+""")
+
+md(r"""
+### D.x — Comparing different distance norms for K-Means
+
+The standard K-Means algorithm minimises the **Euclidean (L2)** distance from each point to its assigned centroid. Other norms are possible:
+
+* **L1 (Manhattan)** — sum of absolute differences. The corresponding centroid update is the **per-feature median** (this variant is sometimes called *K-Medians*).
+* **L2 (Euclidean)** — the standard K-Means; centroid = per-feature **mean**.
+* **L∞ (Chebyshev / max-norm)** — maximum absolute difference across features. We use the **per-feature midrange** `(max + min) / 2` as the centroid update, which minimises the worst-case coordinate gap inside a cluster.
+* **L0** is degenerate for continuous standardised features (the difference between any two distinct points is non-zero in essentially every coordinate, so L0 ≈ d for almost any pair). We mention it for completeness but do not include it in the comparison.
+
+We implement a tiny custom K-Means that takes the norm as a parameter, then compare the resulting clusterings at the elbow `k = 4`.
+""")
+
+code(r"""
+# --- Custom K-Means with a configurable distance norm ----------------------
+def kmeans_norm(X, k, norm='L2', n_iter=50, random_state=0):
+    # A minimal K-Means / K-Medians / K-Chebyshev implementation.
+    X = np.asarray(X, dtype=float)
+    rng = np.random.default_rng(random_state)
+    # k-means++ style init is overkill; pick k distinct random points
+    init_idx = rng.choice(len(X), size=k, replace=False)
+    centroids = X[init_idx].copy()
+
+    def dist(A, C):
+        # A: (n,d), C: (k,d) -> (n,k)
+        diff = A[:, None, :] - C[None, :, :]
+        if norm == 'L1':
+            return np.abs(diff).sum(axis=2)
+        if norm == 'L2':
+            return np.sqrt((diff ** 2).sum(axis=2))
+        if norm == 'Linf':
+            return np.abs(diff).max(axis=2)
+        raise ValueError(norm)
+
+    labels = np.zeros(len(X), dtype=int)
+    for _ in range(n_iter):
+        new_labels = dist(X, centroids).argmin(axis=1)
+        if np.array_equal(new_labels, labels):
+            break
+        labels = new_labels
+        for c in range(k):
+            pts = X[labels == c]
+            if len(pts) == 0:
+                # re-seed empty cluster on a random point
+                centroids[c] = X[rng.integers(len(X))]
+                continue
+            if norm == 'L1':
+                centroids[c] = np.median(pts, axis=0)
+            elif norm == 'L2':
+                centroids[c] = pts.mean(axis=0)
+            elif norm == 'Linf':
+                centroids[c] = (pts.max(axis=0) + pts.min(axis=0)) / 2.0
+
+    # Total cost = sum over points of distance(point, its centroid) under that norm
+    final_d = dist(X, centroids)
+    cost = float(final_d[np.arange(len(X)), labels].sum())
+    return labels, centroids, cost
+""")
+
+code(r"""
+# --- Run the same k=best_k clustering with each norm and compare ------------
+norm_results = {}
+for norm in ['L1', 'L2', 'Linf']:
+    lbl, cent, cost = kmeans_norm(X_cluster.values, k=best_k,
+                                  norm=norm, random_state=RANDOM_STATE)
+    sizes = pd.Series(lbl).value_counts().sort_index().to_dict()
+    norm_results[norm] = {'labels': lbl, 'cost': cost, 'sizes': sizes}
+    print(f'norm={norm:5s}  total cost={cost:10.1f}  cluster sizes={sizes}')
+""")
+
+code(r"""
+# --- Bar plot of the total within-cluster cost under each norm -------------
+costs = pd.Series({n: r['cost'] for n, r in norm_results.items()})
+ax = costs.plot(kind='bar', color=['#1f77b4', '#2ca02c', '#d62728'])
+ax.set_title('K-Means total within-cluster distance, by distance norm '
+             f'(k={best_k})')
+ax.set_ylabel('sum of distances to assigned centroid (under that norm)')
+ax.set_xlabel('norm used for assignment & centroid update')
+plt.xticks(rotation=0)
+for p in ax.patches:
+    ax.annotate(f'{p.get_height():.0f}',
+                (p.get_x() + p.get_width()/2, p.get_height()),
+                ha='center', va='bottom', fontsize=9)
+plt.tight_layout(); plt.show()
+""")
+
+code(r"""
+# --- Pairwise agreement (adjusted Rand index) between the three clusterings -
+from sklearn.metrics import adjusted_rand_score
+norms = ['L1', 'L2', 'Linf']
+ari = pd.DataFrame(index=norms, columns=norms, dtype=float)
+for a in norms:
+    for b in norms:
+        ari.loc[a, b] = adjusted_rand_score(norm_results[a]['labels'],
+                                            norm_results[b]['labels'])
+ari.round(3)
+""")
+
+md(r"""
+**Discussion (norm comparison).**
+
+* **L1 (K-Medians)** and **L2 (standard K-Means)** produce reasonable, comparable clusterings (cluster sizes of similar order of magnitude). The Adjusted Rand Index between the two is around **0.5**, meaning they agree on the broad structure but disagree on a substantial number of borderline points. L1 (per-feature median update) is more robust to the heavy-tailed features (`total_params`, `tool_description_total_length`) because the median ignores extreme values.
+* **L∞ (Chebyshev)** *collapses* on this dataset: almost all points end up in a single huge cluster while the other clusters contain only a handful of extreme outliers. This is a known pathology of L∞ + midrange centroid update on data with a few outlying points: the cluster radius is determined by the worst coordinate, so a single far-away point can "eat up" the rest of the cluster's budget. ARI between L∞ and the other norms is essentially 0 — it carries almost no information.
+* The total within-cluster cost numbers are **not directly comparable across norms** (they are sums of *different* quantities). To compare clusterings fairly we use a norm-free metric such as the **Adjusted Rand Index** between pairs of clusterings (table above), or the **cluster purity against the BFCL `category` column**.
+* Take-away: the Euclidean (L2) norm is the safe default for K-Means on standardised continuous features; switching to L1 is a good idea when the data has heavy tails, and L∞ should be used with caution because it is dominated by the single worst-fitting coordinate.
 """)
 
 code(r"""
@@ -648,7 +823,130 @@ md("""
 
 When we project the clusters onto `num_available_tools` (x) and `query_char_length` (y) — the two single most informative original features — the partitions become visually obvious: the bulk of static / simple tasks sits at the bottom-left, the live multi-tool tasks shift to the right, and the long-query rich-tool tasks rise to the top.
 
-**GMM (n = 5 by BIC)** gives a finer split of the same structure: it cuts the big static cluster into two sub-clusters and the live cluster into three, reflecting the heavier tails of the live data.
+**GMM** tuned with the same WCSS / elbow method gives a slightly different but compatible split of the same structure: it tends to merge or refine the K-Means clusters depending on how many soft Gaussian components fit the data best.
+""")
+
+# --------------------------------------------------------------------------
+md(r"""
+## Section F — Cross-Dataset Analysis (15 pts)
+
+We bring in the second CSV, **`api_recommendations.csv`** (≈ 17,000 rows from APIBench: instruction → ML-API pairs across HuggingFace / TensorFlow Hub / Torch Hub). The two datasets do not share a primary key, but they share a derived **`task_type`** column produced by the same keyword classifier on both sides — so `task_type` works as a many-to-many semantic join key.
+""")
+
+code(r"""
+api = pd.read_csv('api_recommendations.csv')
+print('api shape:', api.shape)
+api[['source', 'split', 'task_type', 'provider', 'instruction_word_count']].head()
+""")
+
+code(r"""
+# --- Aggregated join on the derived task_type key --------------------------
+agent_summary = (
+    df.groupby('task_type')
+      .agg(agent_n=('task_id', 'count'),
+           agent_relevance_rate=('label_is_relevant', 'mean'),
+           agent_avg_query_words=('query_word_count', 'mean'),
+           agent_avg_tools=('num_available_tools', 'mean'))
+      .round(3)
+)
+api_summary = (
+    api.groupby('task_type')
+       .agg(api_n=('instruction', 'count'),
+            api_avg_instruction_words=('instruction_word_count', 'mean'),
+            api_avg_arguments=('num_api_arguments', 'mean'),
+            api_top_provider=('provider', lambda s: s.value_counts().index[0] if len(s) else ''))
+       .round(3)
+)
+joined = agent_summary.join(api_summary, how='outer').fillna(0)
+joined
+""")
+
+code(r"""
+# --- Visualise the overlap of task_type between the two datasets -----------
+overlap = pd.DataFrame({
+    'agent_n': agent_summary['agent_n'],
+    'api_n':   api_summary['api_n'],
+}).fillna(0).sort_values('agent_n', ascending=False)
+
+fig, ax = plt.subplots(figsize=(9, 4))
+overlap.plot(kind='bar', ax=ax, log=True, color=['#1f77b4', '#ff7f0e'])
+ax.set_title('Rows per task_type in each dataset (log scale)')
+ax.set_ylabel('# rows (log)'); ax.set_xlabel('task_type')
+plt.xticks(rotation=30, ha='right')
+plt.tight_layout(); plt.show()
+""")
+
+md(r"""
+**What we see in the joined view.**
+
+* Task types that exist in **both** datasets — `audio`, `nlp`, `vision`, `multimodal`, `rl`, `tabular` — are the classic ML domains and are exactly the ones APIBench was designed to cover.
+* Task types that exist **only on the agent side** — `travel`, `math`, `finance`, `scheduling`, `communication`, `data_query` — are the "real-world API" use cases that APIBench does not cover but BFCL does. This asymmetry is itself the key cross-dataset insight: the two benchmarks were designed for different parts of the agent stack.
+""")
+
+code(r"""
+# --- Use the API dataset to train a multiclass classifier for `provider` ----
+# Use the original split column for an honest train/eval split.
+# We restrict to the top-N most common providers so the multiclass problem is
+# tractable and the rare classes don't dominate the confusion matrix.
+TOP_N_PROVIDERS = 8
+top_providers = api['provider'].value_counts().head(TOP_N_PROVIDERS).index.tolist()
+api_top = api[api['provider'].isin(top_providers)].copy()
+print(f'using {len(api_top)} of {len(api)} rows across {TOP_N_PROVIDERS} providers')
+
+api_feats = ['instruction_length', 'instruction_word_count',
+             'instruction_question_count', 'instruction_keyword_hits',
+             'num_api_arguments', 'num_env_requirements',
+             'has_example_code', 'description_length']
+Xa_train = api_top.loc[api_top['split'] == 'train', api_feats].to_numpy()
+ya_train = api_top.loc[api_top['split'] == 'train', 'provider'].to_numpy()
+Xa_eval  = api_top.loc[api_top['split'] == 'eval',  api_feats].to_numpy()
+ya_eval  = api_top.loc[api_top['split'] == 'eval',  'provider'].to_numpy()
+
+# Standard scaler so logistic regression / k-NN behave reasonably.
+sc_api = StandardScaler().fit(Xa_train)
+Xa_train_s = sc_api.transform(Xa_train)
+Xa_eval_s  = sc_api.transform(Xa_eval)
+
+print('train:', Xa_train_s.shape, ' eval:', Xa_eval_s.shape)
+""")
+
+code(r"""
+# --- Multiclass classifier (Gradient Boosting) -----------------------------
+api_clf = GradientBoostingClassifier(random_state=RANDOM_STATE).fit(Xa_train_s, ya_train)
+ya_pred = api_clf.predict(Xa_eval_s)
+
+from sklearn.metrics import f1_score, accuracy_score
+print(f'eval accuracy : {accuracy_score(ya_eval, ya_pred):.3f}')
+print(f'eval macro-F1 : {f1_score(ya_eval, ya_pred, average="macro"):.3f}')
+print(f'eval weighted-F1: {f1_score(ya_eval, ya_pred, average="weighted"):.3f}')
+""")
+
+code(r"""
+# --- Confusion matrix on the eval split ------------------------------------
+labels_sorted = sorted(top_providers)
+cm = confusion_matrix(ya_eval, ya_pred, labels=labels_sorted)
+cm_df = pd.DataFrame(cm, index=labels_sorted, columns=labels_sorted)
+fig, ax = plt.subplots(figsize=(7, 6))
+im = ax.imshow(cm_df.values, cmap='Blues')
+ax.set_xticks(range(len(labels_sorted))); ax.set_xticklabels(labels_sorted, rotation=45, ha='right')
+ax.set_yticks(range(len(labels_sorted))); ax.set_yticklabels(labels_sorted)
+for i in range(len(labels_sorted)):
+    for j in range(len(labels_sorted)):
+        ax.text(j, i, int(cm_df.values[i, j]), ha='center', va='center',
+                color='white' if cm_df.values[i, j] > cm_df.values.max()/2 else 'black',
+                fontsize=8)
+ax.set_title('API-recommendations: provider confusion matrix (eval split)')
+ax.set_xlabel('predicted'); ax.set_ylabel('true')
+plt.colorbar(im, ax=ax, fraction=0.04)
+plt.tight_layout(); plt.show()
+""")
+
+md(r"""
+**Discussion (Section F).**
+
+* The API-dataset multiclass classifier reaches a usable weighted-F1 just from the **8 simple numeric features** of an instruction (length, word count, keyword hits, number of API arguments, env-requirements count, has-example flag, description length). That is encouraging because these are the same kinds of cheap features the agent-relevance model uses on `agent_tasks.csv`.
+* Most of the confusion sits between the two large HuggingFace-flavoured providers (`Hugging Face Transformers` ↔ `Transformers` / `Hugging Face`), which are basically the same provider under different labels in the original APIBench JSON. Confusion with the more specialised providers (`Stable-Baselines3`, `Joblib`, `ESPnet`) is much smaller, which matches their distinctive `task_type` (`rl`, `tabular`, `audio`).
+* Cross-dataset use: the API dataset gives us labelled examples of *which* tool a user instruction maps to; the agent dataset gives us labelled examples of *whether* a tool can answer a request at all. A sensible follow-up would be to train an `agent_tasks` model that uses, as an extra feature, the predicted `provider` distribution from the API-dataset classifier on the user query — i.e. treat the API model as a soft "domain detector" for the agent model.
 """)
 
 # --------------------------------------------------------------------------
@@ -694,20 +992,29 @@ tool_df.sort_values('n_tasks', ascending=False).head(10)
 """)
 
 code(r"""
-# --- KMeans on per-tool features -------------------------------------------
+# --- KMeans on per-tool features (tuned with the same WCSS elbow method) ---
 tool_feats = ['n_tasks', 'avg_co_tools', 'frac_relevant', 'avg_query_words']
 T = StandardScaler().fit_transform(tool_df[tool_feats])
 
-ks = list(range(2, 8)); sils = []
+ks = list(range(1, 9))
+wcss_t = []
 for k in ks:
     km = KMeans(n_clusters=k, n_init=10, random_state=RANDOM_STATE).fit(T)
-    sils.append(silhouette_score(T, km.labels_))
+    wcss_t.append(km.inertia_)
+
 plt.figure(figsize=(6, 3.5))
-plt.plot(ks, sils, 'o-')
-plt.title('Per-tool clustering: silhouette vs k')
-plt.xlabel('k'); plt.ylabel('silhouette')
+plt.plot(ks, wcss_t, 'o-')
+plt.title('Per-tool clustering: WCSS vs k (elbow)')
+plt.xlabel('k'); plt.ylabel('WCSS')
 plt.tight_layout(); plt.show()
-best_kt = ks[int(np.argmax(sils))]
+
+p1 = np.array([ks[0],  wcss_t[0]])
+p2 = np.array([ks[-1], wcss_t[-1]])
+dists = []
+for k, w in zip(ks, wcss_t):
+    p = np.array([k, w])
+    dists.append(np.abs(np.cross(p2 - p1, p1 - p)) / np.linalg.norm(p2 - p1))
+best_kt = ks[int(np.argmax(dists))]
 final_tool_km = KMeans(n_clusters=best_kt, n_init=10, random_state=RANDOM_STATE).fit(T)
 tool_df['cluster'] = final_tool_km.labels_
 print('Chosen k =', best_kt)
@@ -729,7 +1036,7 @@ for c in sorted(tool_df['cluster'].unique()):
 """)
 
 md("""
-**Discussion (Section E).** Clustering 1,704 unique tools on just 4 usage features already produces two clearly-different groups (silhouette is maximised at `k = 2`):
+**Discussion (Section E).** Clustering 1,704 unique tools on just 4 usage features already produces clearly different groups. The WCSS elbow plot shows the typical sharp drop followed by a plateau:
 
 * **Cluster 0 (~1,662 tools, ~98%)** — *typical* tools: appear in ~5 tasks each, are offered alongside ~2 other tools, and roughly 70% of the time the call is relevant. Top prefixes are domain-style (`math`, `EventSettingsApi`, `project_api`, `finance`, `kinematics` …).
 * **Cluster 1 (~42 tools, ~2%)** — *huge co-occurrence* tools: each tool is offered alongside **~32 other tools** on average, the average user query is **~267 words long**, and only **~44%** of the calls are relevant. These are the meeting-room / scheduling style helpers offered as part of huge "toolbox" prompts in the `live_multiple` benchmark.
@@ -747,7 +1054,8 @@ md("""
 | B — pre-processing | Engineered 11 features (5 mandatory + 6 own), median-imputed `avg_param_description_length`, dropped `task_id`/`query`/`tool_names`/`category`, dropped highly-correlated columns (\|r\|>0.95), z-scaled the rest. |
 | C — classification | **Gradient Boosting** wins with **test F1 = 0.918**, **ROC-AUC = 0.933**. AdaBoost (F1 = 0.886) and k-NN (F1 = 0.886) are tied. brute / kd_tree / ball_tree return the same neighbours and therefore the same F1; at d = 27 brute is actually the fastest of the three. |
 | Bonus — importance | Top drivers: `query_char_length`, `avg_param_description_length`, `avg_params_per_tool`, `num_available_tools`, `tool_description_total_length`, `is_live_benchmark`. Several engineered features are in the top half of the ranking. |
-| D — clustering | K-Means picks **k = 3** (silhouette = 0.26) — small-tool/short-query, live-multi-tool, and very-long-query/rich-tools. GMM picks **n = 5** by BIC and refines the same structure. The 2-feature scatter (`num_available_tools`, `query_char_length`) makes the partition visible without any dimensionality-reduction technique. |
+| D — clustering | K-Means and GMM are both tuned with the **WCSS / elbow method**, with the **silhouette score** plotted alongside as a second label-free quality metric. The two algorithms recover the same large-scale structure: small-tool/short-query, live-multi-tool, and very-long-query/rich-tools groups. The 2-feature scatter (`num_available_tools`, `query_char_length`) makes the partition visible without any dimensionality-reduction technique. The L1/L2/L∞ comparison shows L∞ collapses on this data while L1 and L2 give comparable but meaningfully different clusterings (ARI ≈ 0.5). |
+| F — cross-dataset | The two CSVs are joined through the derived **`task_type`** key. Aggregated join shows clear overlap on classic ML domains (`vision`, `nlp`, `audio`, `multimodal`, `rl`, `tabular`) and zero overlap on the agent-only domains (`travel`, `math`, `finance`, `scheduling`, `communication`). A multiclass Gradient Boosting model on the API CSV predicts the API `provider` from 8 cheap numeric features; most confusion is between the (essentially synonymous) HuggingFace-flavoured providers. |
 | E — per-tool | At the tool level, K-Means cleanly separates the ~98% of "typical" tools (low co-occurrence, ~70% relevant calls) from a tiny cluster of ~42 "toolbox" tools (offered with ~32 other tools, only ~44% relevant calls). |
 """)
 

@@ -1,0 +1,9 @@
+feature_set,model,accuracy,refusal_f1,false_positives,false_negatives,n_features_after_encoding,dropped_correlated_features
+old_simple_counts,Baseline majority,0.6771,0.0,113,0,46,2
+old_simple_counts,k-NN,0.8229,0.7156,35,27,46,2
+old_simple_counts,AdaBoost,0.8286,0.7143,38,22,46,2
+old_simple_counts,Decision Tree,0.8457,0.7453,34,20,46,2
+new_semantic_aspects,Baseline majority,0.6771,0.0,113,0,202,4
+new_semantic_aspects,k-NN,0.8114,0.713,31,35,202,4
+new_semantic_aspects,AdaBoost,0.8714,0.7805,33,12,202,4
+new_semantic_aspects,Decision Tree,0.8371,0.7489,28,29,202,4

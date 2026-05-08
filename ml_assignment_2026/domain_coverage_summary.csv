@@ -1,0 +1,14 @@
+task_domain,agent_tasks,can_answer_rate,avg_query_words,avg_available_tools,api_rows,avg_instruction_words,avg_api_arguments,top_provider
+audio,252,0.929,19.734,3.802,1484,22.803,1.442,Hugging Face Transformers
+communication,25,0.72,26.56,2.76,0,0.0,0.0,none
+data_query,204,0.706,22.446,3.098,1,14.0,1.0,PyTorch
+finance,94,0.745,20.862,1.755,0,0.0,0.0,none
+math,413,0.772,32.034,1.615,0,0.0,0.0,none
+multimodal,2,0.0,34.0,2.0,1365,23.319,1.579,Hugging Face Transformers
+nlp,199,0.638,34.513,2.789,5586,24.125,1.369,Hugging Face Transformers
+other,1484,0.618,15.302,2.059,13,42.231,1.077,PyTorch
+rl,100,0.83,20.02,3.43,196,22.138,2.291,Stable-Baselines3
+scheduling,90,0.778,25.8,3.311,0,0.0,0.0,none
+tabular,7,1.0,71.429,1.571,405,22.598,2.291,Joblib
+travel,511,0.632,16.689,2.857,0,0.0,0.0,none
+vision,110,0.5,74.873,3.264,7953,25.269,1.48,TensorFlow Hub
