@@ -6,7 +6,7 @@ AI agents often receive a user request and a list of tools they are allowed to u
 
 The agent has to make a basic decision:
 
-* use a tool, if at least one tool is relevant;
+* use a tool, if at least one tool is relevant,
 * refuse to use a tool, if none of the tools are relevant.
 
 In this assignment, you will build machine-learning models for this decision.
@@ -26,10 +26,10 @@ This is a binary classification task.
 
 Calling a tool is not always harmless. A wrong tool call can:
 
-* return irrelevant information;
-* waste time, compute, or API money;
-* send private user text to a tool that cannot help;
-* perform an unwanted action, such as sending a message or changing a calendar event;
+* return irrelevant information,
+* waste time, compute, or API money,
+* send private user text to a tool that cannot help,
+* perform an unwanted action, such as sending a message or changing a calendar event,
 * make the agent sound confident when it should admit that its tools are not suitable.
 
 There are two types of prediction mistakes:
@@ -51,9 +51,9 @@ Use this file:
 
 The file has **3,491 rows**. Each row is one agent task:
 
-* the user query;
-* the tools available to the agent;
-* features describing the query, the tools, and the match between them;
+* the user query,
+* the tools available to the agent,
+* features describing the query, the tools, and the match between them,
 * the target label `can_answer`.
 
 The dataset is a simplified CSV extracted from JSON files in the Berkeley Function Calling Leaderboard (BFCL), published by the Gorilla project at UC Berkeley.
@@ -69,7 +69,7 @@ For a full explanation of every column, see **`DATA_DICTIONARY.md`**.
 
 ### Important Dataset Notes
 
-Mention these limitations in your notebook:
+Pay attention to these important notes about the dataset:
 
 * `can_answer` comes from benchmark construction. It is not a new manual annotation made for this course.
 * `task_domain` and `task_complexity` are derived columns. They are useful, but they are not perfect ground truth.
@@ -87,12 +87,12 @@ Explore the dataset before modeling.
 
 You must include:
 
-* at least **5 visualizations**;
-* at least **3 different plot types**;
-* one plot comparing `can_answer = 0` and `can_answer = 1`;
-* one plot comparing live and non-live tasks using `is_live_benchmark`;
-* one plot or table about `task_domain`;
-* one plot or table about `task_complexity`;
+* at least **5 visualizations**,
+* at least **3 different plot types**,
+* one plot comparing `can_answer = 0` and `can_answer = 1`,
+* one plot comparing live and non-live tasks using `is_live_benchmark`,
+* one plot or table about `task_domain`,
+* one plot or table about `task_complexity`,
 * one plot or table about query/tool matching, for example:
   * `aspect_coverage_ratio`,
   * `aspect_overlap_count`,
@@ -139,7 +139,7 @@ Create these 5 features:
 5. **`tool_name_diversity`**  
    Number of unique tool-name prefixes.  
    The prefix is everything before the first `.`.  
-   Example: `math.factorial` has prefix `math`; `get_weather` has prefix `get_weather`.
+   Example: `math.factorial` has prefix `math`, `get_weather` has prefix `get_weather`.
 
 ### B.2 Your Own Features
 
@@ -147,35 +147,35 @@ Create at least **5 more features**.
 
 Examples:
 
-* whether the query contains a question mark;
-* number of quoted strings in the query;
-* whether the task has no available tools;
-* `log(1 + total_params)`;
-* average tool-description length per tool;
-* required parameters per tool;
-* number of tokens in the tool names;
+* whether the query contains a question mark,
+* number of quoted strings in the query,
+* whether the task has no available tools,
+* `log(1 + total_params)`,
+* average tool-description length per tool,
+* required parameters per tool,
+* number of tokens in the tool names,
 * a flag for very long queries.
 
 For each feature, briefly explain:
 
-* what it measures;
+* what it measures,
 * why it might help the model.
 
 ### B.3 Cleaning and Transformation
 
 You must do all of the following:
 
-* handle missing values, including `avg_param_description_length`;
-* apply at least one transformation, such as scaling or one-hot encoding;
+* handle missing values, including `avg_param_description_length`,
+* apply at least one transformation, such as scaling or one-hot encoding,
 * perform at least one feature exclusion or feature selection step.
 
 The required removal of forbidden columns such as `task_uid`, raw `query`, raw `tool_names`, and `can_answer` does **not** count as your feature exclusion or feature selection step. Examples of valid steps include dropping highly correlated features, removing near-constant features, selecting features based on training-set correlation, or using model-based feature importance.
 
 Do **not** use these columns directly as model inputs:
 
-* `task_uid`;
-* raw `query`;
-* raw `tool_names`;
+* `task_uid`,
+* raw `query`,
+* raw `tool_names`,
 * `can_answer`.
 
 You may use `query` and `tool_names` to create new features.
@@ -196,8 +196,8 @@ Train models that predict whether the agent can answer with its available tools.
 
 Use:
 
-* 80% train;
-* 10% validation;
+* 80% train,
+* 10% validation,
 * 10% test.
 
 The split must be stratified by `can_answer`.
@@ -206,16 +206,16 @@ Use `random_state = 42`.
 
 Use:
 
-* the train set to fit models;
-* the validation set to choose hyperparameters;
+* the train set to fit models,
+* the validation set to choose hyperparameters,
 * the test set only once for final results.
 
 ### C.2 Models
 
 Train these models:
 
-1. k-Nearest Neighbors;
-2. AdaBoost;
+1. k-Nearest Neighbors (you can use both ANN algorithms like LSH and KD-trees or the exact algorithm),
+2. AdaBoost,
 3. one more supervised model covered in class.
 
 Also include a simple baseline, such as always predicting the majority class.
@@ -224,34 +224,33 @@ Also include a simple baseline, such as always predicting the majority class.
 
 For each of the 3 main models:
 
-* tune at least **2 hyperparameters**;
-* try at least **3 values** for each tuned hyperparameter;
+* tune at least **2 hyperparameters**,
 * choose the best setting using the validation set.
 
 ### C.4 Evaluation
 
 On the test set, report:
 
-* confusion matrix;
-* accuracy;
-* precision and recall for both classes;
-* F1-score for both classes.
+* confusion matrix,
+* accuracy,
+* precision and recall,
+* F1-score.
 
 Choose one main evaluation metric and explain why you chose it.
 
-The target is imbalanced, so accuracy alone is usually not enough. You can handle the imbalance by choosing suitable evaluation metrics. Oversampling or undersampling are **not required**. If you use them, apply them only to the training set and explain why.
+If the target is imbalanced, accuracy alone is usually not enough. You can handle the imbalance by choosing suitable evaluation metrics. Oversampling or undersampling are **not required**. If you use them, apply them only to the training set and explain why.
 
 In your confusion matrix discussion:
 
-* identify the false positives;
-* identify the false negatives;
+* identify the false positives,
+* identify the false negatives,
 * explain what each mistake means for a tool-using agent.
 
 Also include:
 
-* one comparison plot of the model results;
-* a short discussion of which model worked best;
-* a short discussion of whether you prefer a conservative model that refuses more often or an aggressive model that calls tools more often.
+* one comparison plot of the model results,
+* a short discussion of which model worked best,
+* a short discussion of whether you prefer a conservative model that refuses more often or an aggressive model that calls tools more often. Explain your preference by analyzing the trade-off between false positive and false negative rates.
 
 ---
 
@@ -276,31 +275,40 @@ Build a clustering feature matrix using features from at least **3** of the grou
 
 Do **not** use:
 
-* `can_answer`;
-* `task_uid`;
-* raw `query`;
+* `can_answer`,
+* `task_uid`,
+* raw `query`,
 * raw `tool_names`.
 
 Scale the clustering features if the algorithm depends on distances.
 
 ### D.2 Algorithms and Choosing Clusters
 
-Apply at least **2 clustering algorithms** covered in class.
+Apply exactly these two sklearn-friendly clustering approaches:
 
-Examples:
+1. **K-Means**, using `sklearn.cluster.KMeans`.
+2. **Agglomerative hierarchical clustering**, using `sklearn.cluster.AgglomerativeClustering`.
 
-* K-Means;
-* Gaussian Mixture Models;
-* agglomerative clustering.
+For K-Means:
 
-For each algorithm:
+* try several values for the number of clusters,
+* use WCSS elbow plots and silhouette scores,
+* choose a final number of clusters and justify it,
 
-* try several values of `k` or `n_components`;
-* plot WCSS or another clustering-quality curve;
-* plot silhouette score;
+
+For agglomerative hierarchical clustering, compare linkage and distance choices:
+
+* compare at least **3 linkage functions** from `single`, `complete`, `average`, and `ward`,
+* compare at least **2 distance metrics** from `euclidean`/L2, `manhattan`/L1, and `chebyshev`/L-infinity,
+* remember that Ward linkage only works with Euclidean distance.
+
+For the hierarchical clustering experiments:
+
+* try several values for the number of clusters,
+* use silhouette scores and a dendrogram or linkage-distance plot,
 * choose a final number of clusters and justify it.
 
-For K-Means, WCSS/elbow plots are appropriate. For agglomerative clustering, you may use silhouette scores and, if covered in class, a dendrogram or linkage-distance plot. If you use Gaussian Mixture Models, silhouette score is acceptable for this assignment.
+When comparing hierarchical settings, explain how the linkage function and distance metric change the clusters you obtain.
 
 It is okay if the best silhouette score is not very high. The goal is to find useful groups and explain them clearly.
 
@@ -308,10 +316,10 @@ It is okay if the best silhouette score is not very high. The goal is to find us
 
 For your final clustering:
 
-* show cluster sizes;
-* show mean or median feature values per cluster;
-* compare clusters to `can_answer` only **after** clustering;
-* compare clusters to `task_domain` or `task_complexity`;
+* show cluster sizes,
+* show mean or median feature values per cluster,
+* compare clusters to `can_answer` only **after** clustering,
+* compare clusters to `task_domain` or `task_complexity`,
 * give each cluster a short descriptive name.
 
 Create a cluster profile table like this:
@@ -338,11 +346,11 @@ Required slides:
 
 Also include a final summary table in your notebook with:
 
-* best model;
-* main metric;
-* test performance;
-* most important practical error;
-* one dataset limitation;
+* best model,
+* main metric,
+* test performance,
+* most important practical error,
+* one dataset limitation,
 * one suggested improvement.
 
 Submit the presentation as a PDF.
@@ -353,36 +361,45 @@ Submit the presentation as a PDF.
 
 You may earn up to **20 bonus points** total.
 
-## Bonus 1 - Feature Importance (up to 10 pts)
+## Bonus 1 - L1, L2, and L-Infinity Clustering Comparison (up to 5 pts)
 
-Analyze which features matter most.
+Compare whether the clustering result changes when the distance metric changes.
 
-Use at least one method:
+Use the same clustering feature matrix from Section D, or a clearly explained subset of it. Then run a clustering method that supports different distance metrics, such as `sklearn_extra.cluster.KMedoids` (use `pip install scikit-learn-extra` to get it).
 
-* correlation with the label;
-* model-based feature importance;
-* permutation importance;
-* drop-column importance;
-* correlation between features to identify redundancy.
+Compare all three metrics:
+
+* L2 / Euclidean distance, for example `metric="euclidean"`,
+* L1 / Manhattan distance, for example `metric="manhattan"`,
+* L-infinity / Chebyshev distance, for example `metric="chebyshev"`.
+
+For each metric:
+
+* try several values for the number of clusters,
+* report a clustering-quality score, such as silhouette score,
+* show cluster sizes,
+* create at least one plot or table that helps compare the metrics.
 
 Report:
 
-* 3 useful features;
-* 3 weak or redundant features;
-* whether engineered features helped;
-* any feature that is hard to interpret.
+* which metric gave the best result by your chosen score,
+* whether the best metric also gave the most interpretable clusters,
+* whether the cluster profiles changed meaningfully across L1, L2, and L-infinity,
+* one short explanation of why the distance metric might matter for this dataset.
 
-## Bonus 2 - Tool-Level Analysis (up to 10 pts)
+If you use KMedoids, clearly state that it uses **medoids**, which are actual data rows, instead of K-Means-style mean centroids.
+
+## Bonus 2 - Tool-Level Analysis (up to 15 pts)
 
 Build a new dataset where each row is one unique tool name from `tool_names`.
 
 Create at least 5 tool-level features, such as:
 
-* number of tasks where the tool appears;
-* average number of co-available tools;
-* fraction of tasks with `can_answer = 1`;
-* average query length for tasks containing the tool;
-* tool-name prefix;
+* number of tasks where the tool appears,
+* average number of co-available tools,
+* fraction of tasks with `can_answer = 1`,
+* average query length for tasks containing the tool,
+* tool-name prefix,
 * average parameter counts of tasks containing the tool.
 
 Then formulate one ML question about tools and answer it using a method covered in class.
@@ -405,8 +422,8 @@ Example questions:
 | D. Clustering | 15 |
 | Presentation and final summary | 10 |
 | **Total** | **100** |
-| Bonus 1. Feature importance | +10 |
-| Bonus 2. Tool-level analysis | +10 |
+| Bonus 1. L1/L2/L-infinity clustering comparison | +5 |
+| Bonus 2. Tool-level analysis | +15 |
 
 ---
 
@@ -422,20 +439,20 @@ All notebook outputs must be visible in the submitted HTML.
 
 Your code should:
 
-* run from top to bottom without errors;
-* use clear section headers;
-* use meaningful variable names;
-* avoid using the test set during model selection;
+* run from top to bottom without errors,
+* use clear section headers,
+* use meaningful variable names,
+* avoid using the test set during model selection,
 * explain any library used beyond the standard course libraries.
 
 Dataset limitation: `can_answer` is derived from how the original benchmark examples were constructed, not from new human annotations made specifically for this course. Therefore, the label is useful for this assignment, but it should not be treated as perfect real-world ground truth about whether an AI agent should call a tool. Some models may learn patterns from the benchmark construction and keyword-based features rather than fully general tool-use reasoning.
 
 Major penalties:
 
-* using `can_answer` as an input feature;
-* using raw IDs as predictive features;
-* tuning models on the test set;
-* submitting a notebook that does not run;
+* using `can_answer` as an input feature,
+* using raw IDs as predictive features,
+* tuning models on the test set,
+* submitting a notebook that does not run,
 * showing plots without explaining what they mean.
 
 Use of LLMs is allowed, but you must briefly state how you used them.

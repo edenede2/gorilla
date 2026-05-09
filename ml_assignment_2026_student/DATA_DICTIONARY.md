@@ -71,7 +71,7 @@ You do not need the original JSON files for this assignment.
 | IDs | Do not use `task_uid` as a feature. |
 | Raw text | Do not feed raw `query` or raw `tool_names` directly into numeric models. Use them only to create features. |
 | Categorical columns | Encode columns such as `task_domain`, `task_complexity`, `query_aspects`, and `tool_aspects` before using them in models. |
-| Multi-value columns | `query_aspects`, `tool_aspects`, and `tool_names` can contain several values separated by `|`. Treat them carefully if you use them. |
+| Multi-value columns | `query_aspects`, `tool_aspects`, and `tool_names` can contain several values separated by "pipe" (`\|`). Treat them carefully if you use them. |
 | Missing values | Handle missing `avg_param_description_length` and missing/empty `tool_names`. |
 | Target | Do not use `can_answer` as an input feature. |
 
@@ -80,6 +80,6 @@ You do not need the original JSON files for this assignment.
 ## Target Meaning
 
 | `can_answer` | Meaning |
-|---:|---|
+|---|---|
 | 1 | At least one available tool is relevant to the user query. |
 | 0 | No available tool is relevant; the agent should refuse to call a tool. |
